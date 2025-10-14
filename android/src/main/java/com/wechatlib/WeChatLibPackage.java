@@ -19,9 +19,11 @@ public class WeChatLibPackage implements ReactPackage {
         });
     }
 
-    public List<Class<? extends JavaScriptModule>> createJSModules() {
-        return Collections.emptyList();
-    }
+    // createJSModules() method is deprecated in React Native 0.47+
+    // @Override
+    // public List<Class<? extends JavaScriptModule>> createJSModules() {
+    //     return Collections.emptyList();
+    // }
 
     @Override
     public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
