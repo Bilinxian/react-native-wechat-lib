@@ -29,12 +29,13 @@ function wrapRegisterApp(nativeFunc) {
     if (isAppRegistered) {
       return Promise.resolve(true);
     }
-    isAppRegistered = true;
     return new Promise((resolve, reject) => {
       nativeFunc.apply(null, [
         ...args,
         (error, result) => {
           if (!error) {
+            // 仅在 Native 注册成功后再置位，避免失败后 wrapApi 误判已注册。
+            isAppRegistered = true;
             return resolve(result);
           }
           if (typeof error === 'string') {
@@ -45,6 +46,43 @@ function wrapRegisterApp(nativeFunc) {
       ]);
     });
   };
+}
+
+/**
+ * 统一「Native 发起 + 等待 WeChat_Resp」：
+ * 先挂监听再调 Native；Native invoke 失败时移除监听并 reject，避免孤儿 Promise（WSB-1Y4）。
+ */
+function invokeAndWaitForResponse(nativePromiseFactory, responseEvent) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onResp = (resp) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      emitter.removeListener(responseEvent, onResp);
+      if (resp.errCode === 0) {
+        resolve(resp);
+      } else {
+        reject(new WechatError(resp));
+      }
+    };
+    emitter.addListener(responseEvent, onResp);
+    Promise.resolve()
+      .then(nativePromiseFactory)
+      .catch((error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        emitter.removeListener(responseEvent, onResp);
+        if (typeof error === 'string') {
+          reject(new Error(error));
+          return;
+        }
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+  });
 }
 
 function wrapApi(nativeFunc) {
@@ -396,29 +434,22 @@ export function launchMiniProgram({
   miniProgramType = 0,
   path = '',
 }) {
-  return new Promise((resolve, reject) => {
-    if (
-      miniProgramType !== 0 &&
-      miniProgramType !== 1 &&
-      miniProgramType !== 2
-    ) {
-      reject(
-        new WechatError({
-          errStr: '拉起小程序的类型不对，0-正式版 1-开发版 2-体验版',
-          errCode: -1,
-        })
-      );
-      return;
-    }
-    nativeLaunchMiniProgram({ userName, miniProgramType, path });
-    emitter.once('WXLaunchMiniProgramReq.Resp', (resp) => {
-      if (resp.errCode === 0) {
-        resolve(resp);
-      } else {
-        reject(new WechatError(resp));
-      }
-    });
-  });
+  if (
+    miniProgramType !== 0 &&
+    miniProgramType !== 1 &&
+    miniProgramType !== 2
+  ) {
+    return Promise.reject(
+      new WechatError({
+        errStr: '拉起小程序的类型不对，0-正式版 1-开发版 2-体验版',
+        errCode: -1,
+      })
+    );
+  }
+  return invokeAndWaitForResponse(
+    () => nativeLaunchMiniProgram({ userName, miniProgramType, path }),
+    'WXLaunchMiniProgramReq.Resp'
+  );
 }
 
 /**

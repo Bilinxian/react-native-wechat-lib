@@ -40,58 +40,50 @@ wechat callback function, If not configured, When sharing is called, it appears 
 微信回调方法，如果不配置，分享的时候微信会出现"正在连接"，然后直接弹回APP。
 
 ```objc
+#import "WechatLib.h"
+
 - (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url {
-    return  [WXApi handleOpenURL:url delegate:self];
+    // 必须把回调交给 WechatLib，才能向 JS 发送 WeChat_Resp（含小程序唤起结果）
+    return [WechatLib handleOpenURL:url];
 }
 
 - (BOOL)application:(UIApplication *)application
   continueUserActivity:(NSUserActivity *)userActivity
   restorationHandler:(void(^)(NSArray<id<UIUserActivityRestoring>> * __nullable
   restorableObjects))restorationHandler {
-  // 触发回调方法
   [RCTLinkingManager application:application continueUserActivity:userActivity restorationHandler:restorationHandler];
-  return [WXApi handleOpenUniversalLink:userActivity
-  delegate:self];
+  return [WechatLib handleOpenUniversalLink:userActivity];
 }
 ```
 Universal Links config, If not used, please ignore.  
 Universal Links 配置文件, 没使用的话可以忽略。
 ```objc
 #import <React/RCTLinkingManager.h>
-
-// ios 8.x or older 不建议再使用这段配置，所以注释掉
-// - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url
-// sourceApplication:(NSString *)sourceApplication annotation:(id)annotation
-// {
-//   [RCTLinkingManager application:application openURL:url options:options];
-//   return [WXApi handleOpenURL:url delegate:self];
-// }
+#import "WechatLib.h"
 
 // ios 9.0+
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url
             options:(NSDictionary<NSString*, id> *)options
 {
-  // Triggers a callback event.
-  // 触发回调事件
   [RCTLinkingManager application:application openURL:url options:options];
-  return [WXApi handleOpenURL:url delegate:self];
+  return [WechatLib handleOpenURL:url];
 }
 ```
-**注意：不使用 Universal Links 会导致调用微信支付成功后无法获取回调事件。**
+**注意：**
+1. 不要使用 `delegate:self`（AppDelegate 未实现 `onResp` 时 JS 收不到回调）。
+2. 不使用 Universal Links 会导致微信支付 / 小程序回跳后无法获取回调事件。
 ## 3. Then copy the following in `AppDelegate.h`: 
 ```
 #import <React/RCTBridgeDelegate.h>
 #import <UIKit/UIKit.h>
-#import "WXApi.h"
 
-@interface AppDelegate : UIResponder <UIApplicationDelegate, RCTBridgeDelegate, WXApiDelegate>
+@interface AppDelegate : UIResponder <UIApplicationDelegate, RCTBridgeDelegate>
 
 @property (nonatomic, strong) UIWindow *window;
 
 @end
 ```
-Mainly need to add '#import "WXApi.h"' and 'wxapidelegate'.  
-主要是需要加上 '#import "WXApi.h"' 和 'WXApiDelegate' 。
+AppDelegate 无需再实现 `WXApiDelegate`；回调由 `WechatLib` 模块处理。
 
 ## 4. 从版本 3.0.0 开始，需要手动导入 libWeChatSDK.a 到 XCode
 直接复制本项目的 /ios/libWeChatSDK.a 到 Xcode 项目根目录，详细可参考 example 工程

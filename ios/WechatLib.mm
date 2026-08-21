@@ -14,13 +14,17 @@
 
 @synthesize bridge = _bridge;
 
+// AppDelegate 需把 WXApi 回调指到本模块；RN 创建模块时写入，销毁时清空。
+static WechatLib *g_sharedWechatLib = nil;
+
 RCT_EXPORT_MODULE()
 
 - (instancetype)init
 {
     self = [super init];
     if (self) {
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleOpenURL:) name:@"RCTOpenURLNotification" object:nil];
+        g_sharedWechatLib = self;
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleOpenURLNotification:) name:@"RCTOpenURLNotification" object:nil];
     }
     return self;
 }
@@ -28,9 +32,44 @@ RCT_EXPORT_MODULE()
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    if (g_sharedWechatLib == self) {
+        g_sharedWechatLib = nil;
+    }
 }
 
-- (BOOL)handleOpenURL:(NSNotification *)aNotification
+/**
+ * 返回当前桥接模块单例，供 AppDelegate 转发微信回调。
+ */
++ (instancetype)sharedInstance
+{
+    return g_sharedWechatLib;
+}
+
+/**
+ * AppDelegate URL Scheme 入口：委托给已挂 bridge 的 WechatLib。
+ */
++ (BOOL)handleOpenURL:(NSURL *)url
+{
+    WechatLib *instance = [WechatLib sharedInstance];
+    if (instance == nil || url == nil) {
+        return NO;
+    }
+    return [WXApi handleOpenURL:url delegate:instance];
+}
+
+/**
+ * AppDelegate Universal Link 入口：委托给已挂 bridge 的 WechatLib。
+ */
++ (BOOL)handleOpenUniversalLink:(NSUserActivity *)userActivity
+{
+    WechatLib *instance = [WechatLib sharedInstance];
+    if (instance == nil || userActivity == nil) {
+        return NO;
+    }
+    return [WXApi handleOpenUniversalLink:userActivity delegate:instance];
+}
+
+- (BOOL)handleOpenURLNotification:(NSNotification *)aNotification
 {
     NSString * aURLString =  [aNotification userInfo][@"url"];
     NSURL * aURL = [NSURL URLWithString:aURLString];

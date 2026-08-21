@@ -28,4 +28,20 @@
 
 @property NSString* appId;
 
+/**
+ * 返回当前桥接模块实例，供 AppDelegate 将 WXApi 回调交给本模块处理。
+ * 须在 RN bridge 创建 WechatLib 之后调用；过早调用会返回 nil。
+ */
++ (instancetype)sharedInstance;
+
+/**
+ * 将 URL Scheme 回调交给微信 SDK，并由本模块转发 WeChat_Resp 到 JS。
+ */
++ (BOOL)handleOpenURL:(NSURL *)url;
+
+/**
+ * 将 Universal Link 回调交给微信 SDK，并由本模块转发 WeChat_Resp 到 JS。
+ */
++ (BOOL)handleOpenUniversalLink:(NSUserActivity *)userActivity;
+
 @end
