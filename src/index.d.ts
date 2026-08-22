@@ -149,7 +149,7 @@ declare module 'react-native-wechat-lib' {
   ): Promise<{ errCode?: number; errStr?: string }>;
   export function launchMiniProgram(
     message: LaunchMiniProgramMetadata
-  ): Promise<{ errCode?: number; errStr?: string }>;
+  ): Promise<{ errCode?: number; errStr?: string }> & { cancel?: () => void };
   export function subscribeMessage(
     message: SubscribeMessageMetadata
   ): Promise<{ errCode?: number; errStr?: string }>;

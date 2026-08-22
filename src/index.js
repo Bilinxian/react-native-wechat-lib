@@ -29,12 +29,13 @@ function wrapRegisterApp(nativeFunc) {
     if (isAppRegistered) {
       return Promise.resolve(true);
     }
-    isAppRegistered = true;
     return new Promise((resolve, reject) => {
       nativeFunc.apply(null, [
         ...args,
         (error, result) => {
           if (!error) {
+            // 仅在 Native 注册成功后再置位，避免失败后 wrapApi 误判已注册。
+            isAppRegistered = true;
             return resolve(result);
           }
           if (typeof error === 'string') {
@@ -45,6 +46,76 @@ function wrapRegisterApp(nativeFunc) {
       ]);
     });
   };
+}
+
+/**
+ * 统一「Native 发起 + 等待 WeChat_Resp」：
+ * 先挂监听再调 Native；Native invoke 失败时移除监听并 reject，避免孤儿 Promise（WSB-1Y4）。
+ * 返回的 Promise 带 cancel()：卸掉 Resp 监听并以 WECHAT_LAUNCH_CANCELLED reject，避免超时后误伤下次唤起。
+ */
+function invokeAndWaitForResponse(nativePromiseFactory, responseEvent) {
+  let settled = false;
+  let onResp = null;
+  let rejectRef = null;
+
+  /**
+   * 取消等待：始终卸掉 Resp 监听；仅在尚未 settle 时以取消错误 reject。
+   */
+  const cancel = () => {
+    if (onResp) {
+      emitter.removeListener(responseEvent, onResp);
+      onResp = null;
+    }
+    if (settled) {
+      return;
+    }
+    settled = true;
+    if (rejectRef) {
+      rejectRef(
+        new WechatError({
+          errStr: 'launchMiniProgram cancelled',
+          errCode: 'WECHAT_LAUNCH_CANCELLED',
+        })
+      );
+    }
+  };
+
+  const promise = new Promise((resolve, reject) => {
+    rejectRef = reject;
+    onResp = (resp) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      emitter.removeListener(responseEvent, onResp);
+      onResp = null;
+      if (resp.errCode === 0) {
+        resolve(resp);
+      } else {
+        reject(new WechatError(resp));
+      }
+    };
+    emitter.addListener(responseEvent, onResp);
+    Promise.resolve()
+      .then(nativePromiseFactory)
+      .catch((error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (onResp) {
+          emitter.removeListener(responseEvent, onResp);
+          onResp = null;
+        }
+        if (typeof error === 'string') {
+          reject(new Error(error));
+          return;
+        }
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+  });
+  promise.cancel = cancel;
+  return promise;
 }
 
 function wrapApi(nativeFunc) {
@@ -385,40 +456,33 @@ export function shareMiniProgram(data) {
 
 /**
  * 打开小程序
- * @method launchMini
- * @param
+ * @method launchMiniProgram
  * @param {String} userName - 拉起的小程序的username
  * @param {Integer} miniProgramType - 拉起小程序的类型. 0-正式版 1-开发版 2-体验版
  * @param {String} path - 拉起小程序页面的可带参路径，不填默认拉起小程序首页
+ * @returns {Promise} 附带 cancel()，用于调用方超时/回前台兜底时卸掉 WeChat_Resp 监听
  */
 export function launchMiniProgram({
   userName,
   miniProgramType = 0,
   path = '',
 }) {
-  return new Promise((resolve, reject) => {
-    if (
-      miniProgramType !== 0 &&
-      miniProgramType !== 1 &&
-      miniProgramType !== 2
-    ) {
-      reject(
-        new WechatError({
-          errStr: '拉起小程序的类型不对，0-正式版 1-开发版 2-体验版',
-          errCode: -1,
-        })
-      );
-      return;
-    }
-    nativeLaunchMiniProgram({ userName, miniProgramType, path });
-    emitter.once('WXLaunchMiniProgramReq.Resp', (resp) => {
-      if (resp.errCode === 0) {
-        resolve(resp);
-      } else {
-        reject(new WechatError(resp));
-      }
-    });
-  });
+  if (
+    miniProgramType !== 0 &&
+    miniProgramType !== 1 &&
+    miniProgramType !== 2
+  ) {
+    return Promise.reject(
+      new WechatError({
+        errStr: '拉起小程序的类型不对，0-正式版 1-开发版 2-体验版',
+        errCode: -1,
+      })
+    );
+  }
+  return invokeAndWaitForResponse(
+    () => nativeLaunchMiniProgram({ userName, miniProgramType, path }),
+    'WXLaunchMiniProgramReq.Resp'
+  );
 }
 
 /**
